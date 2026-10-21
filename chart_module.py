@@ -7,14 +7,17 @@ import numpy as np
 def create_interactive_chart(
     df: pd.DataFrame, 
     heatmap_data: dict = None, 
+    levels: list = None,
     show_vwap: bool = True, 
     show_ema: bool = True,
-    show_cvd: bool = True
+    show_cvd: bool = True,
+    **kwargs
 ) -> go.Figure:
     """
     Constructs an interactive high-performance candlestick chart with:
     - Main price action canvas
     - Overlaid VWAP and EMA bands
+    - Support / Resistance levels
     - Liquidation heatmap horizontal bands / cluster zones
     - Cumulative Volume Delta (CVD) subplot
     """
@@ -95,16 +98,33 @@ def create_interactive_chart(
             row=2, col=1
         )
 
-    # 7. Liquidation Heatmap Pools / Horizontal Bands
+    # 7. Render Key Levels (Support / Resistance / Pivots)
+    if levels:
+        for lvl in levels:
+            price_val = lvl if isinstance(lvl, (int, float)) else lvl.get("price", 0)
+            lvl_name = lvl.get("name", "Level") if isinstance(lvl, dict) else "Level"
+            lvl_color = lvl.get("color", "#94A3B8") if isinstance(lvl, dict) else "#94A3B8"
+            
+            if price_val > 0:
+                fig.add_hline(
+                    y=price_val,
+                    line_dash="dash",
+                    line_color=lvl_color,
+                    line_width=1,
+                    annotation_text=f"{lvl_name}: ${price_val:,.1f}",
+                    annotation_position="left",
+                    annotation_font=dict(size=9, color=lvl_color),
+                    row=1, col=1
+                )
+
+    # 8. Liquidation Heatmap Pools / Horizontal Bands
     if heatmap_data:
         long_pools = []
         short_pools = []
 
-        # Safe extraction whether heatmap_data is a dict or list
         if isinstance(heatmap_data, dict):
             long_pools = heatmap_data.get("long_pools", [])
             short_pools = heatmap_data.get("short_pools", [])
-            # Also check if wrapped under 'clusters'
             if not long_pools and not short_pools and "clusters" in heatmap_data:
                 for c in heatmap_data["clusters"]:
                     if c.get("side") == "long":
@@ -119,11 +139,9 @@ def create_interactive_chart(
                     else:
                         short_pools.append([item.get("price", 0), item.get("estimated_volume", 0)])
 
-        # Max volume normalization for opacity intensity
         all_vols = [v for _, v in long_pools] + [v for _, v in short_pools]
         max_vol = max(all_vols) if all_vols and max(all_vols) > 0 else 1.0
 
-        # Draw Short Liquidation Zones (Above Market Price)
         for price, vol in short_pools:
             alpha = max(0.15, min(0.65, vol / max_vol))
             fig.add_hline(
@@ -137,7 +155,6 @@ def create_interactive_chart(
                 row=1, col=1
             )
 
-        # Draw Long Liquidation Zones (Below Market Price)
         for price, vol in long_pools:
             alpha = max(0.15, min(0.65, vol / max_vol))
             fig.add_hline(
@@ -151,7 +168,7 @@ def create_interactive_chart(
                 row=1, col=1
             )
 
-    # 8. Dark Terminal Theme & Layout Styling
+    # 9. Dark Terminal Theme & Layout Styling
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0A0E17",
