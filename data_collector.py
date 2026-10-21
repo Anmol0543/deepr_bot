@@ -334,4 +334,7 @@ class DataCollector:
       items = [item["title"] for item in res.get("items", [])][:3]
       return items if items else ["Markets steady."]
     except Exception:
-      return ["News feed unavailable."]
+            return ["News feed unavailable."]
+
+# Alias to maintain compatibility with app.py imports
+MarketDataEngine = DataCollector
