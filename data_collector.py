@@ -51,7 +51,7 @@ class DataCollector:
   def fetch_chart_dataframe(
       self, symbol: str = "BTC", timeframe: str = "15m", limit: int = 150
   ) -> pd.DataFrame:
-    """Fetches OHLCV candlestick data and computes technical / flow indicators:
+    """Fetches OHLCV candlestick data and computes technical indicators:
 
     SMA, EMA (9, 21, 50, 200), VWAP, CVD, RSI, MACD, and ATR.
     """
@@ -198,7 +198,7 @@ class DataCollector:
       funding = self.exchange.fetch_funding_rate(market_symbol)
       return float(funding.get("fundingRate") or 0.0)
     except Exception:
-      return 0.0001  # Baseline neutral funding fallback (0.01%)
+      return 0.0001
 
   def fetch_open_interest(self, symbol: str = "BTC") -> float:
     """Fetches aggregate open interest value in USD."""
@@ -269,12 +269,62 @@ class DataCollector:
         "cascade_status": cascade_status,
     }
 
+  def calculate_liquidation_heatmap_clusters(
+      self, df: pd.DataFrame, curr_price: float
+  ) -> list:
+    """Calculates liquidation clusters and leverage pool bands."""
+    if df.empty or curr_price <= 0:
+      return []
+
+    clusters = []
+    recent_bars = df.tail(60)
+
+    leverage_tiers = [
+        {"lev": 100, "dist": 0.010, "weight": 0.35},
+        {"lev": 50, "dist": 0.020, "weight": 0.45},
+        {"lev": 25, "dist": 0.040, "weight": 0.70},
+        {"lev": 10, "dist": 0.100, "weight": 1.20},
+    ]
+
+    highs = recent_bars["high"].nlargest(3).values
+    lows = recent_bars["low"].nsmallest(3).values
+
+    for h in highs:
+      if h >= curr_price:
+        for tier in leverage_tiers:
+          liq_price = round(h * (1.0 + tier["dist"]), 2)
+          volume_est = round(tier["weight"] * 1.5 * 100000, 2)
+          clusters.append({
+              "price": liq_price,
+              "type": "Short Liquidation",
+              "side": "short",
+              "leverage": f"{tier['lev']}x",
+              "estimated_volume": volume_est,
+              "intensity": min(1.0, tier["weight"] * 0.8),
+          })
+
+    for l in lows:
+      if l <= curr_price:
+        for tier in leverage_tiers:
+          liq_price = round(l * (1.0 - tier["dist"]), 2)
+          volume_est = round(tier["weight"] * 1.5 * 100000, 2)
+          clusters.append({
+              "price": liq_price,
+              "type": "Long Liquidation",
+              "side": "long",
+              "leverage": f"{tier['lev']}x",
+              "estimated_volume": volume_est,
+              "intensity": min(1.0, tier["weight"] * 0.8),
+          })
+
+    return sorted(clusters, key=lambda x: x["price"])
+
   def fetch_mtf_matrix(
       self,
       symbols: list = None,
       timeframes: list = None,
   ) -> pd.DataFrame:
-    """Builds a Multi-Timeframe (MTF) trend and momentum matrix across assets."""
+    """Builds a Multi-Timeframe trend and momentum matrix."""
     if symbols is None:
       symbols = ["BTC", "ETH", "SOL"]
     if timeframes is None:
@@ -334,63 +384,8 @@ class DataCollector:
       items = [item["title"] for item in res.get("items", [])][:3]
       return items if items else ["Markets steady."]
     except Exception:
-            return ["News feed unavailable."]
-    def calculate_liquidation_heatmap_clusters(self, df: pd.DataFrame, curr_price: float) -> list:
-        """
-        Calculates synthetic liquidation clusters and leverage pool bands 
-        around key swing highs, swing lows, and psychological price thresholds.
-        """
-        if df.empty or curr_price <= 0:
-            return []
+      return ["News feed unavailable."]
 
-        clusters = []
-        recent_bars = df.tail(60)
 
-        # Leverage tiers to model liquidation distance thresholds
-        leverage_tiers = [
-            {"lev": 100, "dist": 0.010, "weight": 0.35},
-            {"lev": 50,  "dist": 0.020, "weight": 0.45},
-            {"lev": 25,  "dist": 0.040, "weight": 0.70},
-            {"lev": 10,  "dist": 0.100, "weight": 1.20},
-        ]
-
-        # 1. Identify local swing levels
-        highs = recent_bars['high'].nlargest(3).values
-        lows = recent_bars['low'].nsmallest(3).values
-
-        # 2. Short Liquidation Pools (stacked above resistance and price)
-        for h in highs:
-            if h >= curr_price:
-                for tier in leverage_tiers:
-                    liq_price = round(h * (1.0 + tier["dist"]), 2)
-                    volume_est = round(tier["weight"] * 1.5 * 100000, 2)
-                    clusters.append({
-                        "price": liq_price,
-                        "type": "Short Liquidation",
-                        "side": "short",
-                        "leverage": f"{tier['lev']}x",
-                        "estimated_volume": volume_est,
-                        "intensity": min(1.0, tier["weight"] * 0.8)
-                    })
-
-        # 3. Long Liquidation Pools (stacked below support and price)
-        for l in lows:
-            if l <= curr_price:
-                for tier in leverage_tiers:
-                    liq_price = round(l * (1.0 - tier["dist"]), 2)
-                    volume_est = round(tier["weight"] * 1.5 * 100000, 2)
-                    clusters.append({
-                        "price": liq_price,
-                        "type": "Long Liquidation",
-                        "side": "long",
-                        "leverage": f"{tier['lev']}x",
-                        "estimated_volume": volume_est,
-                        "intensity": min(1.0, tier["weight"] * 0.8)
-                    })
-
-        # Sort clusters by price level ascending
-        clusters = sorted(clusters, key=lambda x: x["price"])
-        return clusters
-
-# Alias to maintain compatibility with app.py imports
+# Aliases to maintain exact compatibility with app.py imports
 MarketDataEngine = DataCollector
