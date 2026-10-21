@@ -1,0 +1,4 @@
+.env
+__pycache__/
+trades.db
+cloudflare.log
